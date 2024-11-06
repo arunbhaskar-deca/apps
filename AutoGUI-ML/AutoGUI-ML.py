@@ -6,20 +6,19 @@ import json
 import numpy as np
 import time, sys
 
-if __name__ == '__main__':
+if __name__ == '__main__' and len(sys.argv) == 1:
 
     # Initialize EasyOCR reader
-    reader = easyocr.Reader(['en'], model_storage_directory='./models/', download_enabled=False, gpu=False)
 
     # Capture screenshot of a selected window
     def capture_screenshot(window_title):
         window = gw.getWindowsWithTitle(window_title)[0]
-        try:
-            window.activate()
-        except:
-            window.minimize()
+        if window.isMinimized:
             window.restore()
-        time.sleep(2)
+        time.sleep(1)
+        window.activate()
+
+        time.sleep(1)
 
         window_size = (window.width, window.height)
         screenshot = pyautogui.screenshot(region=(window.left, window.top, window.width, window.height))
@@ -31,6 +30,9 @@ if __name__ == '__main__':
         boxes = []
 
         if use_ocr:
+            import easyocr
+            reader = easyocr.Reader(['en'], model_storage_directory='./models/', download_enabled=False, gpu=False)
+
             results = reader.readtext(image_np)
             for result in results:
                 top_left, bottom_right = result[0][0], result[0][2]
@@ -102,3 +104,96 @@ if __name__ == '__main__':
         )
 
     demo.launch()
+
+else:
+    def open_and_resize_window(window_title, window_size):
+        # Open and resize the window
+
+        window = pyautogui.getWindowsWithTitle(window_title)[0]
+
+        if window.isMinimized:
+            window.restore()
+        time.sleep(1)
+        window.activate()
+
+        time.sleep(1)
+        window.resizeTo(window_size[0], window_size[1])
+        print(f"Window '{window_title}' opened and resized to {window_size[0]}x{window_size[1]}")
+
+        time.sleep(1)
+
+    def read_bounding_box(bbox, window_title):
+        # Read text from the bounding box
+
+        window = pyautogui.getWindowsWithTitle(window_title)[0]
+
+        screenshot = pyautogui.screenshot(region=(bbox['xmin'], bbox['ymin'], bbox['xmax'] - bbox['xmin'], bbox['ymax'] - bbox['ymin']))
+
+        import easyocr
+        reader = easyocr.Reader(['en'], model_storage_directory='./models/', download_enabled=False, gpu=False)
+
+        ss_np = np.array(screenshot)
+        results = reader.readtext(ss_np)
+
+        for detection in results:
+            print(detection[1])
+
+    def write_bounding_box(bbox, operations, window_title):
+        # Perform the specified operations on the bounding box
+
+        window = pyautogui.getWindowsWithTitle(window_title)[0]
+
+        center_x = window.left + (bbox['xmin'] + bbox['xmax']) // 2
+        center_y = window.top +(bbox['ymin'] + bbox['ymax']) // 2
+
+
+        for operation in operations:
+            if operation == 'click':
+                pyautogui.click(center_x, center_y)
+            elif operation.startswith('keypress:'):
+                keys = operation.split(':')[1]
+                for key in str(keys):
+                    pyautogui.press(key, interval=0.1)
+            elif operation == 'enter':
+                pyautogui.press('enter', interval=0.1)
+            elif operation == 'copy':
+                pyautogui.hotkey('ctrl', 'c')
+            elif operation == 'paste':
+                pyautogui.hotkey('ctrl', 'v')
+            elif operation == 'delete':
+                pyautogui.hotkey('ctrl', 'a')
+                pyautogui.hotkey('del')
+            elif operation == 'undo':
+                pyautogui.hotkey('ctrl', 'z')
+            elif operation == 'redo':
+                pyautogui.hotkey('ctrl', 'y')
+
+    def exec_cmd(json_file, *args):
+        print("Reading JSON file...", json_file)
+        with open(json_file) as f:
+            config = json.load(f)
+
+        window_name = list(config.keys())[0]
+        window_size = config[window_name]['window_size']
+
+        open_and_resize_window(window_name, window_size)
+
+        for i in range(0, len(args), 2):
+            bb = args[i]
+            fn = args[i+1]
+
+            bbox = next((b for b in config[window_name]['annotations'] if b['label'] == bb), None)
+
+            if bbox is None:
+                print(f"Bounding box {bb} not found in config file.")
+                continue
+
+            if fn == 'read':
+                read_bounding_box(bbox, window_name)
+            elif fn == 'write':
+                oprations = fn.split('::')[1].split(',')
+                write_bounding_box(bbox, oprations, window_name)
+
+    exec_cmd(sys.argv[1], *sys.argv[2:])
+
+
